@@ -13,13 +13,23 @@ enum Role {
 }
 
 model User {
+  id            Int            @id @default(autoincrement())
+  email         String         @unique
+  name          String?
+  password      String
+  role          Role           @default(USER)
+  createdAt     DateTime       @default(now())
+  posts         Post[]
+  refreshTokens RefreshToken[]
+}
+
+model RefreshToken {
   id        Int      @id @default(autoincrement())
-  email     String   @unique
-  name      String?
-  password  String   @default("temp123")
-  role      Role     @default(USER)
+  token     String   @unique
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
   createdAt DateTime @default(now())
-  posts     Post[]
 }
 
 model Post {

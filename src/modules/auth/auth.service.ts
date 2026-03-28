@@ -1,62 +1,102 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import crypto from "node:crypto";
 import { prisma } from "../../../lib/prisma.js";
 import type { RegisterInput, LoginInput } from "./auth.schema.js";
 
 // ── Tipos ──────────────────────────────────────────────────────────────────
 export interface TokenPayload {
-  sub: number;   // id del usuario
+  sub: number;
   email: string;
   role: string;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-const JWT_SECRET = process.env.JWT_SECRET ?? "dev_secret_change_in_production";
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? "7d";
+// ── Config ─────────────────────────────────────────────────────────────────
+const JWT_SECRET      = process.env.JWT_SECRET      ?? "dev_secret_change_in_production";
+const ACCESS_EXPIRES  = process.env.ACCESS_EXPIRES  ?? "15m";
+const REFRESH_EXPIRES_MS = 7 * 24 * 60 * 60 * 1000; // 7 días en ms
 
-function signToken(payload: TokenPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions);
+// ── Helpers ────────────────────────────────────────────────────────────────
+function signAccessToken(payload: TokenPayload): string {
+  return jwt.sign(payload, JWT_SECRET, {
+    expiresIn: ACCESS_EXPIRES,
+  } as jwt.SignOptions);
+}
+
+async function createRefreshToken(userId: number): Promise<string> {
+  // Token opaco — string aleatorio de 64 bytes, almacenado en DB.
+  // No es un JWT: si se filtra, sin la DB no sirve para nada.
+  const token = crypto.randomBytes(64).toString("hex");
+
+  await prisma.refreshToken.create({
+    data: {
+      token,
+      userId,
+      expiresAt: new Date(Date.now() + REFRESH_EXPIRES_MS),
+    },
+  });
+
+  return token;
 }
 
 // ── Servicios ──────────────────────────────────────────────────────────────
 export async function registerUser(input: RegisterInput) {
   const exists = await prisma.user.findUnique({ where: { email: input.email } });
-  if (exists) {
-    throw new Error("El email ya está registrado");
-  }
+  if (exists) throw new Error("El email ya está registrado");
 
   const hashedPassword = await bcrypt.hash(input.password, 10);
 
   const user = await prisma.user.create({
-    data: {
-      email: input.email,
-      name: input.name,
-      password: hashedPassword,
-      // role: USER por defecto (definido en el schema)
-    },
+    data: { email: input.email, name: input.name, password: hashedPassword },
     select: { id: true, email: true, name: true, role: true, createdAt: true },
   });
 
-  const token = signToken({ sub: user.id, email: user.email, role: user.role });
+  const accessToken  = signAccessToken({ sub: user.id, email: user.email, role: user.role });
+  const refreshToken = await createRefreshToken(user.id);
 
-  return { user, token };
+  return { user, accessToken, refreshToken };
 }
 
 export async function loginUser(input: LoginInput) {
   const user = await prisma.user.findUnique({ where: { email: input.email } });
-  if (!user) {
-    // Mismo mensaje para no revelar si el email existe
-    throw new Error("Credenciales inválidas");
-  }
 
-  const validPassword = await bcrypt.compare(input.password, user.password);
-  if (!validPassword) {
-    throw new Error("Credenciales inválidas");
-  }
+  // Mismo mensaje para no revelar si el email existe
+  if (!user) throw new Error("Credenciales inválidas");
 
-  const token = signToken({ sub: user.id, email: user.email, role: user.role });
+  const valid = await bcrypt.compare(input.password, user.password);
+  if (!valid) throw new Error("Credenciales inválidas");
 
-  const { password: _password, ...safeUser } = user;
+  const { password: _pw, ...safeUser } = user;
 
-  return { user: safeUser, token };
+  const accessToken  = signAccessToken({ sub: user.id, email: user.email, role: user.role });
+  const refreshToken = await createRefreshToken(user.id);
+
+  return { user: safeUser, accessToken, refreshToken };
+}
+
+export async function refreshAccessToken(refreshToken: string) {
+  const stored = await prisma.refreshToken.findUnique({
+    where: { token: refreshToken },
+    include: { user: true },
+  });
+
+  if (!stored)                       throw new Error("Refresh token inválido");
+  if (stored.expiresAt < new Date()) throw new Error("Refresh token expirado");
+
+  // Rotación: borramos el token usado y emitimos uno nuevo.
+  // Si alguien roba el refresh token y lo usa, el token original queda
+  // inválido y el dueño legítimo notará el error en su próximo refresh.
+  await prisma.refreshToken.delete({ where: { id: stored.id } });
+
+  const { user } = stored;
+  const newAccessToken  = signAccessToken({ sub: user.id, email: user.email, role: user.role });
+  const newRefreshToken = await createRefreshToken(user.id);
+
+  return { accessToken: newAccessToken, refreshToken: newRefreshToken };
+}
+
+export async function logoutUser(refreshToken: string) {
+  // Solo elimina el token del dispositivo actual.
+  // deleteMany para que no lance error si el token ya no existe (idempotente).
+  await prisma.refreshToken.deleteMany({ where: { token: refreshToken } });
 }

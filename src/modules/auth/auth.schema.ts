@@ -3,7 +3,7 @@ import { z } from "zod";
 export const registerSchema = z.object({
   email: z.email("Email inválido"),
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
-  name: z.string().min(1, "El nombre es requerido").optional(),
+  name: z.string().min(1).optional(),
 });
 
 export const loginSchema = z.object({
@@ -11,5 +11,15 @@ export const loginSchema = z.object({
   password: z.string().min(1, "La contraseña es requerida"),
 });
 
+export const refreshSchema = z.object({
+  refreshToken: z.string().min(1, "El refresh token es requerido"),
+});
+
+export const logoutSchema = z.object({
+  refreshToken: z.string().min(1, "El refresh token es requerido"),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
-export type LoginInput = z.infer<typeof loginSchema>;
+export type LoginInput    = z.infer<typeof loginSchema>;
+export type RefreshInput  = z.infer<typeof refreshSchema>;
+export type LogoutInput   = z.infer<typeof logoutSchema>;
