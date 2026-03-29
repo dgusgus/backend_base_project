@@ -5,6 +5,10 @@ import cors from "cors";
 import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
 import { httpLogger } from "./middlewares/httpLogger.js";          // ← importa el config validado
+
+import { generateOpenAPIDocument } from "./config/openapi.js";
+import swaggerUi from "swagger-ui-express";
+
 import authRoutes from "./modules/auth/auth.routes.js";
 import rbacRoutes from "./modules/rbac/rbac.routes.js";
 import { apiLimiter } from "./middlewares/rateLimiter.js";
@@ -12,6 +16,14 @@ import { errorHandler } from "./middlewares/errorHandler.js";
 
 const app  = express();
 const PORT = process.env.PORT ?? 3000;
+
+// ── Swagger UI (solo en desarrollo) ───────────────────────
+if (env.NODE_ENV !== "production") {
+  const openApiDoc = generateOpenAPIDocument();
+  app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiDoc));
+  app.get("/docs.json", (_req, res) => res.json(openApiDoc));  // útil para Postman/Insomnia
+  logger.info("📚  Swagger UI disponible en http://localhost:3000/docs");
+}
 
 // ── Seguridad ──────────────────────────────────────────────────────────────
 app.use(helmet());  // Headers HTTP de seguridad (XSS, MIME sniff, etc.)
