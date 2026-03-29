@@ -1,22 +1,22 @@
 import type { Request, Response, NextFunction } from "express";
+import { AppError } from "../config/errors.js";
+import { logger } from "../config/logger.js";
+import { env } from "../config/env.js";
 
-// Este middleware captura cualquier error que llegue via next(error)
-// desde cualquier controller o middleware de la app.
-// Debe registrarse SIEMPRE al final de app.ts, después de todas las rutas.
+export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction) {
+  if (err instanceof AppError) {
+    res.status(err.statusCode).json({
+      error: err.message,
+      ...(err.code && { code: err.code }),
+    });
+    return;
+  }
 
-export function errorHandler(
-  err: Error,
-  _req: Request,
-  res: Response,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _next: NextFunction
-) {
-  console.error(`[ERROR] ${err.message}`);
-  console.error(err.stack);
+  // Bug inesperado — loggea con stack trace completo
+  logger.error({ err }, err.message);  // ← pino serializa el error correctamente
 
   res.status(500).json({
     error: "Error interno del servidor",
-    // Solo mostrar detalle en desarrollo
-    ...(process.env.NODE_ENV === "development" && { detail: err.message }),
+    ...(env.NODE_ENV === "development" && { detail: err.message }),
   });
 }

@@ -1,13 +1,11 @@
 import { prisma } from "../../../lib/prisma.js";
-
+import { NotFoundError } from "../.././config/errors.js";
 // ── Cambiar rol de un usuario ──────────────────────────────────────────────
 // Solo debería llamarse desde un endpoint protegido con requireRole("ADMIN")
 
 export async function changeUserRole(userId: number, newRole: "USER" | "ADMIN") {
   const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) {
-    throw new Error("Usuario no encontrado");
-  }
+  if (!user) throw new NotFoundError("Usuario no encontrado", "USER_NOT_FOUND");
 
   const updated = await prisma.user.update({
     where: { id: userId },
